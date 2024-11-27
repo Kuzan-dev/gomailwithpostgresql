@@ -38,8 +38,15 @@ func main() {
 		log.Fatal("Error al cargar el archivo .env")
 	}
 
+	// Obtén la URI desde la variable de entorno
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL no está configurada")
+	}
+
 	// Establecer la conexión con la base de datos usando GORM
-	db, err := sql.Open("postgres", "user=coneimera password=123456 dbname=coneimera sslmode=disable")
+	//db, err := sql.Open("postgres", "user=coneimera password=123456 dbname=coneimera sslmode=disable")
+	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatal("Error al abrir la conexión:", err)
 	}
