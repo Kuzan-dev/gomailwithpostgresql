@@ -27,6 +27,8 @@ type PaymentForm struct {
 	Telefono        string `json:"telefono"`
 	Universidad     string `json:"universidad"`
 	Entrada         string `json:"entrada"`
+	Codigo          string `json:"codigo"`
+	Carrera         string `json:"carrera"`
 	TipoOperacion   string `json:"tipo_operacion"`
 	NumeroOperacion string `json:"numero_operacion"`
 }
@@ -75,13 +77,15 @@ func main() {
 			Telefono:        c.FormValue("telefono"),
 			Universidad:     c.FormValue("universidad"),
 			Entrada:         c.FormValue("entrada"),
+			Codigo:          c.FormValue("codigo"),
+			Carrera:         c.FormValue("carrera"),
 			TipoOperacion:   c.FormValue("tipo_operacion"),
 			NumeroOperacion: c.FormValue("numero_operacion"),
 		}
 
 		// Validar los datos recibidos
 		if form.Nombres == "" || form.Apellidos == "" || form.Correo == "" || form.Telefono == "" ||
-			form.Universidad == "" || form.Entrada == "" || form.TipoOperacion == "" || form.NumeroOperacion == "" {
+			form.Universidad == "" || form.Entrada == "" || form.TipoOperacion == "" || form.NumeroOperacion == "" || form.Codigo == "" || form.Carrera == "" {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Todos los campos son obligatorios"})
 		}
 		log.Printf("Datos recibidos: %+v", form)
@@ -129,10 +133,11 @@ func main() {
 
 		// Guardar en la base de datos
 		_, err = db.Exec(`
-			INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, tipo_operacion, numero_operacion) 
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.TipoOperacion, form.NumeroOperacion,
+    INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion) 
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion,
 		)
+
 		if err != nil {
 			log.Printf("Error al insertar en la base de datos: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al insertar en la base de datos"})
@@ -177,6 +182,8 @@ func createTables(db *sql.DB) {
 			telefono VARCHAR(50),
 			universidad VARCHAR(255),
 			entrada VARCHAR(50),
+			codigo VARCHAR(50),
+			carrera VARCHAR(255),
 			tipo_operacion VARCHAR(50),
 			numero_operacion VARCHAR(50) UNIQUE
 		);
@@ -197,7 +204,9 @@ func formatBody(form *PaymentForm) string {
 		Teléfono: %s<br>
 		Universidad: %s<br>
 		Entrada: %s<br>
+		Código: %s<br>
+		Carrera: %s<br>
 		Tipo de Operación: %s<br>
 		Número de Operación: %s<br>`,
-		form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.TipoOperacion, form.NumeroOperacion)
+		form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion)
 }
