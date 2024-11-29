@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"image"
+	"image/gif"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -164,7 +166,7 @@ func main() {
 		// Comprobar si es una imagen o un PDF
 		if fileType == "image/jpeg" || fileType == "image/png" || fileType == "image/gif" || fileType == "image/bmp" || fileType == "image/tiff" {
 			// Decodificar la imagen
-			img, _, err := image.Decode(src)
+			img, format, err := image.Decode(src)
 			if err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Formato de imagen inválido"})
 			}
@@ -172,9 +174,27 @@ func main() {
 			// Comprimir la imagen
 			compressed := resize.Resize(800, 0, img, resize.Lanczos3)
 
-			// Guardar la imagen en un formato estándar (JPEG o PNG)
-			if err := jpeg.Encode(&fileData, compressed, nil); err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al comprimir la imagen"})
+			// Guardar la imagen en el formato correspondiente (JPEG, PNG, etc.)
+			switch format {
+			case "jpeg":
+				if err := jpeg.Encode(&fileData, compressed, nil); err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al comprimir la imagen"})
+				}
+			case "png":
+				// Guardar como PNG
+				if err := png.Encode(&fileData, compressed); err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al comprimir la imagen PNG"})
+				}
+			case "gif":
+				// Guardar como GIF (opcional, dependiendo de si lo necesitas)
+				if err := gif.Encode(&fileData, compressed, nil); err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al comprimir la imagen GIF"})
+				}
+			default:
+				// Si es otro formato, no comprimir y guardar tal cual
+				if err := jpeg.Encode(&fileData, img, nil); err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al guardar la imagen en su formato original"})
+				}
 			}
 		} else if fileType == "application/pdf" {
 			// Si el archivo es un PDF, copiar su contenido
@@ -185,7 +205,6 @@ func main() {
 			// Si el tipo de archivo no es ni imagen ni PDF
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El tipo de archivo no está permitido"})
 		}
-
 		// Guardar en la base de datos
 		_, err = db.Exec(`
         INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion) 
