@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 
 	"github.com/joho/godotenv"
@@ -83,67 +85,114 @@ func main() {
 			NumeroOperacion: c.FormValue("numero_operacion"),
 		}
 
-		// Validar los datos recibidos
-		if form.Nombres == "" || form.Apellidos == "" || form.Correo == "" || form.Telefono == "" ||
-			form.Universidad == "" || form.Entrada == "" || form.TipoOperacion == "" || form.NumeroOperacion == "" || form.Codigo == "" || form.Carrera == "" {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Todos los campos son obligatorios"})
+		// Validar campos obligatorios
+		missingFields := []string{}
+		if form.Nombres == "" {
+			missingFields = append(missingFields, "nombres")
 		}
-		log.Printf("Datos recibidos: %+v", form)
+		if form.Apellidos == "" {
+			missingFields = append(missingFields, "apellidos")
+		}
+		if form.Correo == "" || !isValidEmail(form.Correo) {
+			missingFields = append(missingFields, "correo")
+		}
+		if form.Telefono == "" {
+			missingFields = append(missingFields, "telefono")
+		}
+		if form.Universidad == "" {
+			missingFields = append(missingFields, "universidad")
+		}
+		if form.Entrada == "" {
+			missingFields = append(missingFields, "entrada")
+		}
+		if form.Codigo == "" {
+			missingFields = append(missingFields, "codigo")
+		}
+		if form.Carrera == "" {
+			missingFields = append(missingFields, "carrera")
+		}
+		if form.TipoOperacion == "" {
+			missingFields = append(missingFields, "tipo_operacion")
+		}
+		if form.NumeroOperacion == "" {
+			missingFields = append(missingFields, "numero_operacion")
+		}
+
+		// Si faltan campos, devolver un error
+		if len(missingFields) > 0 {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"error":          "Faltan campos obligatorios",
+				"missing_fields": missingFields,
+			})
+		}
 
 		// Validar que el número de operación no esté registrado
 		var exists bool
 		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM pagos WHERE numero_operacion = $1 AND tipo_operacion = $2)", form.NumeroOperacion, form.TipoOperacion).Scan(&exists)
 		if err != nil {
 			log.Printf("Error al ejecutar la consulta: %v", err)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Database error"})
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error en la base de datos"})
 		}
 		if exists {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Número de operación ya registrado previamente"})
 		}
 
-		// Manejo del archivo de comprobante de pago
+		// Validar el archivo `comprobante_pago`
 		file, err := c.FormFile("comprobante_pago")
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Error al recibir el archivo"})
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Debe cargar un archivo de comprobante de pago válido"})
 		}
 
+		// Validar tamaño del archivo (5 MB = 5 * 1024 * 1024 bytes)
+		if file.Size > 5*1024*1024 {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El archivo supera el tamaño máximo permitido de 5 MB"})
+		}
+
+		// Abrir el archivo
 		src, err := file.Open()
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al abrir el archivo"})
 		}
 		defer src.Close()
 
-		// Procesar y comprimir la imagen (manteniendo tu lógica existente)
-		var imgData bytes.Buffer
-		if _, err := io.Copy(&imgData, src); err != nil {
+		buffer := make([]byte, 512)
+		if _, err := src.Read(buffer); err != nil && err != io.EOF {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al leer el archivo"})
 		}
+		fileType := http.DetectContentType(buffer)
+		src.Seek(0, 0)
 
-		img, err := jpeg.Decode(&imgData)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Formato de imagen inválido"})
-		}
-		compressed := resize.Resize(800, 0, img, resize.Lanczos3)
+		var fileData bytes.Buffer
 
-		var buffer bytes.Buffer
-		err = jpeg.Encode(&buffer, compressed, nil)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al comprimir la imagen"})
+		if fileType == "image/jpeg" || fileType == "image/png" {
+			img, _, err := image.Decode(src)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Formato de imagen inválido"})
+			}
+
+			compressed := resize.Resize(800, 0, img, resize.Lanczos3)
+			if err := jpeg.Encode(&fileData, compressed, nil); err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al comprimir la imagen"})
+			}
+		} else if fileType == "application/pdf" {
+			if _, err := io.Copy(&fileData, src); err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al leer el archivo PDF"})
+			}
+		} else {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El tipo de archivo no está permitido"})
 		}
 
 		// Guardar en la base de datos
 		_, err = db.Exec(`
-    INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion) 
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 			form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion,
 		)
-
 		if err != nil {
 			log.Printf("Error al insertar en la base de datos: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al insertar en la base de datos"})
 		}
-
-		// Enviar el correo (manteniendo tu lógica existente)
+		// Enviar el correo
 		m := gomail.NewMessage()
 		m.SetHeader("From", os.Getenv("EMAIL"))
 		m.SetHeader("To", os.Getenv("EMAILOUT"))
@@ -152,7 +201,7 @@ func main() {
 		body := formatBody(form)
 		m.SetBody("text/html", body)
 		m.Attach(file.Filename, gomail.SetCopyFunc(func(w io.Writer) error {
-			_, err := w.Write(buffer.Bytes())
+			_, err := w.Write(fileData.Bytes())
 			return err
 		}))
 
@@ -209,4 +258,10 @@ func formatBody(form *PaymentForm) string {
 		Tipo de Operación: %s<br>
 		Número de Operación: %s<br>`,
 		form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion)
+}
+
+// Función para validar el correo electrónico
+func isValidEmail(email string) bool {
+	re := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	return re.MatchString(email)
 }
