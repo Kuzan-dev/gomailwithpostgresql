@@ -161,21 +161,28 @@ func main() {
 
 		var fileData bytes.Buffer
 
-		if fileType == "image/jpeg" || fileType == "image/png" {
+		// Comprobar si es una imagen o un PDF
+		if fileType == "image/jpeg" || fileType == "image/png" || fileType == "image/gif" || fileType == "image/bmp" || fileType == "image/tiff" {
+			// Decodificar la imagen
 			img, _, err := image.Decode(src)
 			if err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Formato de imagen inválido"})
 			}
 
+			// Comprimir la imagen
 			compressed := resize.Resize(800, 0, img, resize.Lanczos3)
+
+			// Guardar la imagen en un formato estándar (JPEG o PNG)
 			if err := jpeg.Encode(&fileData, compressed, nil); err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al comprimir la imagen"})
 			}
 		} else if fileType == "application/pdf" {
+			// Si el archivo es un PDF, copiar su contenido
 			if _, err := io.Copy(&fileData, src); err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al leer el archivo PDF"})
 			}
 		} else {
+			// Si el tipo de archivo no es ni imagen ni PDF
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El tipo de archivo no está permitido"})
 		}
 
