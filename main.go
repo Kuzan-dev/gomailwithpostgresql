@@ -105,9 +105,6 @@ func main() {
 		if form.Entrada == "" {
 			missingFields = append(missingFields, "entrada")
 		}
-		if form.Codigo == "" {
-			missingFields = append(missingFields, "codigo")
-		}
 		if form.Carrera == "" {
 			missingFields = append(missingFields, "carrera")
 		}
