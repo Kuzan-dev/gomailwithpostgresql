@@ -37,6 +37,14 @@ type PaymentForm struct {
 	NumeroOperacion string `json:"numero_operacion"`
 }
 
+var errorCodes = map[string]string{
+	"missing_fields":      "Faltan campos obligatorios",
+	"invalid_email":       "El correo electrónico no es válido",
+	"duplicate_operation": "Número de operación ya registrado previamente",
+	"file_too_large":      "El archivo supera el tamaño máximo permitido de 5 MB",
+	"email_error":         "Error al enviar el correo",
+}
+
 func main() {
 	// Cargar las variables del entorno
 	err := godotenv.Load()
@@ -119,10 +127,7 @@ func main() {
 
 		// Si faltan campos, devolver un error
 		if len(missingFields) > 0 {
-			return c.JSON(http.StatusBadRequest, map[string]interface{}{
-				"error":          "Faltan campos obligatorios",
-				"missing_fields": missingFields,
-			})
+			return respondWithError(c, http.StatusBadRequest, "missing_fields", missingFields)
 		}
 
 		// Validar que el número de operación no esté registrado
@@ -133,7 +138,7 @@ func main() {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error en la base de datos"})
 		}
 		if exists {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Número de operación ya registrado previamente"})
+			return respondWithError(c, http.StatusBadRequest, "duplicate_operation", nil)
 		}
 
 		// Validar el archivo `comprobante_pago`
@@ -144,7 +149,10 @@ func main() {
 
 		// Validar tamaño del archivo (5 MB = 5 * 1024 * 1024 bytes)
 		if file.Size > 5*1024*1024 {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El archivo supera el tamaño máximo permitido de 5 MB"})
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"error_code": "file_too_large",
+				"error":      errorCodes["file_too_large"],
+			})
 		}
 
 		// Abrir el archivo
@@ -233,7 +241,8 @@ func main() {
 		d.SSL = true
 
 		if err := d.DialAndSend(m); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al enviar el correo"})
+			log.Printf("Error al enviar correo: %v", err)
+			return respondWithError(c, http.StatusInternalServerError, "email_error", nil)
 		}
 
 		return c.JSON(http.StatusOK, map[string]string{"message": "Formulario enviado con éxito"})
@@ -287,4 +296,12 @@ func formatBody(form *PaymentForm) string {
 func isValidEmail(email string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 	return re.MatchString(email)
+}
+
+func respondWithError(c echo.Context, statusCode int, errorCode string, details interface{}) error {
+	return c.JSON(statusCode, map[string]interface{}{
+		"error_code": errorCode,
+		"error":      errorCodes[errorCode],
+		"details":    details, // Puede ser nil si no hay detalles específicos
+	})
 }
