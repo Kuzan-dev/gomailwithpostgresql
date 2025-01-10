@@ -20,6 +20,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	_ "github.com/lib/pq"
 	"github.com/nfnt/resize"
+	"github.com/xuri/excelize/v2"
 	gomail "gopkg.in/gomail.v2"
 )
 
@@ -246,6 +247,62 @@ func main() {
 		}
 
 		return c.JSON(http.StatusOK, map[string]string{"message": "Formulario enviado con éxito"})
+	})
+
+	// Ruta para descargar el reporte en Excel
+	e.GET("/descargarreporte", func(c echo.Context) error {
+		// Crear el archivo Excel
+		excel := excelize.NewFile()
+
+		// Crear la hoja y agregar encabezados
+		sheetName := "ReportePagos"
+		excel.SetSheetName("Sheet1", sheetName)
+		headers := []string{
+			"ID", "Nombres", "Apellidos", "Correo", "Teléfono", "Universidad", "Entrada", "Código", "Carrera", "Tipo de Operación", "Número de Operación",
+		}
+		for i, header := range headers {
+			cell := string(rune('A'+i)) + "1"
+			excel.SetCellValue(sheetName, cell, header)
+		}
+
+		// Obtener los datos de la tabla pagos
+		rows, err := db.Query(`SELECT id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion FROM pagos`)
+		if err != nil {
+			log.Printf("Error al obtener datos de la tabla pagos: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener datos"})
+		}
+		defer rows.Close()
+
+		// Agregar datos al archivo Excel
+		rowIndex := 2 // Comienza después de los encabezados
+		for rows.Next() {
+			var id int
+			var nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion string
+
+			if err := rows.Scan(&id, &nombres, &apellidos, &correo, &telefono, &universidad, &entrada, &codigo, &carrera, &tipoOperacion, &numeroOperacion); err != nil {
+				log.Printf("Error al escanear datos de la fila: %v", err)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al procesar datos"})
+			}
+
+			data := []interface{}{id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion}
+			for i, value := range data {
+				cell := string(rune('A'+i)) + strconv.Itoa(rowIndex)
+				excel.SetCellValue(sheetName, cell, value)
+			}
+			rowIndex++
+		}
+
+		// Comprobar errores después de iterar
+		if err := rows.Err(); err != nil {
+			log.Printf("Error durante la iteración de filas: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al procesar datos"})
+		}
+
+		// Guardar el archivo en memoria y enviarlo como respuesta
+		fileName := "reporte_pagos.xlsx"
+		c.Response().Header().Set(echo.HeaderContentDisposition, "attachment; filename="+fileName)
+		c.Response().Header().Set(echo.HeaderContentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		return excel.Write(c.Response().Writer)
 	})
 
 	// Iniciar el servidor
