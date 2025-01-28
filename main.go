@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -36,6 +37,7 @@ type PaymentForm struct {
 	Carrera         string `json:"carrera"`
 	TipoOperacion   string `json:"tipo_operacion"`
 	NumeroOperacion string `json:"numero_operacion"`
+	DNI             string `json:"dni"`
 }
 
 var errorCodes = map[string]string{
@@ -94,6 +96,7 @@ func main() {
 			Carrera:         c.FormValue("carrera"),
 			TipoOperacion:   c.FormValue("tipo_operacion"),
 			NumeroOperacion: c.FormValue("numero_operacion"),
+			DNI:             c.FormValue("dni"),
 		}
 
 		// Validar campos obligatorios
@@ -124,6 +127,9 @@ func main() {
 		}
 		if form.NumeroOperacion == "" {
 			missingFields = append(missingFields, "numero_operacion")
+		}
+		if form.DNI == "" {
+			missingFields = append(missingFields, "dni")
 		}
 
 		// Si faltan campos, devolver un error
@@ -216,9 +222,9 @@ func main() {
 		}
 		// Guardar en la base de datos
 		_, err = db.Exec(`
-        INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion,
+    INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion, dni) 
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion, form.DNI,
 		)
 		if err != nil {
 			log.Printf("Error al insertar en la base de datos: %v", err)
@@ -258,7 +264,7 @@ func main() {
 		sheetName := "ReportePagos"
 		excel.SetSheetName("Sheet1", sheetName)
 		headers := []string{
-			"ID", "Nombres", "Apellidos", "Correo", "Teléfono", "Universidad", "Entrada", "Código", "Carrera", "Tipo de Operación", "Número de Operación",
+			"ID", "Nombres", "Apellidos", "Correo", "Teléfono", "Universidad", "Entrada", "Código", "Carrera", "Tipo de Operación", "Número de Operación", "DNI", "Fecha de Registro",
 		}
 		for i, header := range headers {
 			cell := string(rune('A'+i)) + "1"
@@ -266,7 +272,7 @@ func main() {
 		}
 
 		// Obtener los datos de la tabla pagos
-		rows, err := db.Query(`SELECT id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion FROM pagos`)
+		rows, err := db.Query(`SELECT id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion, dni, fecha_registro FROM pagos`)
 		if err != nil {
 			log.Printf("Error al obtener datos de la tabla pagos: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener datos"})
@@ -277,14 +283,15 @@ func main() {
 		rowIndex := 2 // Comienza después de los encabezados
 		for rows.Next() {
 			var id int
-			var nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion string
+			var nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion, dni string
+			var fechaRegistro time.Time
 
-			if err := rows.Scan(&id, &nombres, &apellidos, &correo, &telefono, &universidad, &entrada, &codigo, &carrera, &tipoOperacion, &numeroOperacion); err != nil {
+			if err := rows.Scan(&id, &nombres, &apellidos, &correo, &telefono, &universidad, &entrada, &codigo, &carrera, &tipoOperacion, &numeroOperacion, &dni, &fechaRegistro); err != nil {
 				log.Printf("Error al escanear datos de la fila: %v", err)
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al procesar datos"})
 			}
 
-			data := []interface{}{id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion}
+			data := []interface{}{id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion, dni, fechaRegistro.Format("2006-01-02 15:04:05")}
 			for i, value := range data {
 				cell := string(rune('A'+i)) + strconv.Itoa(rowIndex)
 				excel.SetCellValue(sheetName, cell, value)
@@ -323,7 +330,9 @@ func createTables(db *sql.DB) {
 			codigo VARCHAR(50),
 			carrera VARCHAR(255),
 			tipo_operacion VARCHAR(50),
-			numero_operacion VARCHAR(50) UNIQUE
+			numero_operacion VARCHAR(50) UNIQUE,
+			dni VARCHAR(20), -- Nuevo campo DNI
+      fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
 	if err != nil {
@@ -336,17 +345,18 @@ func createTables(db *sql.DB) {
 // Formatear los datos del formulario para el cuerpo del correo
 func formatBody(form *PaymentForm) string {
 	return fmt.Sprintf(`
-		Nombres: %s<br>
-		Apellidos: %s<br>
-		Correo: %s<br>
-		Teléfono: %s<br>
-		Universidad: %s<br>
-		Entrada: %s<br>
-		Código: %s<br>
-		Carrera: %s<br>
-		Tipo de Operación: %s<br>
-		Número de Operación: %s<br>`,
-		form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion)
+			Nombres: %s<br>
+			Apellidos: %s<br>
+			Correo: %s<br>
+			Teléfono: %s<br>
+			Universidad: %s<br>
+			Entrada: %s<br>
+			Código: %s<br>
+			Carrera: %s<br>
+			Tipo de Operación: %s<br>
+			Número de Operación: %s<br>
+			DNI: %s<br>`,
+		form.Nombres, form.Apellidos, form.Correo, form.Telefono, form.Universidad, form.Entrada, form.Codigo, form.Carrera, form.TipoOperacion, form.NumeroOperacion, form.DNI)
 }
 
 // Función para validar el correo electrónico
