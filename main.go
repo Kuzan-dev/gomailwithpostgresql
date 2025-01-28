@@ -245,7 +245,7 @@ func main() {
 
 		port, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
 		d := gomail.NewDialer(os.Getenv("SMTP_SERVER"), port, os.Getenv("EMAIL"), os.Getenv("PASSWORD"))
-		d.SSL = true
+		d.SSL = false // Mailtrap no usa SSL en el puerto 587
 
 		if err := d.DialAndSend(m); err != nil {
 			log.Printf("Error al enviar correo: %v", err)
