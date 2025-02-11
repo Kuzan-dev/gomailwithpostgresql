@@ -283,7 +283,8 @@ func main() {
 		rowIndex := 2 // Comienza después de los encabezados
 		for rows.Next() {
 			var id int
-			var nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion, dni string
+			var nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion string
+			var dni sql.NullString
 			var fechaRegistro time.Time
 
 			if err := rows.Scan(&id, &nombres, &apellidos, &correo, &telefono, &universidad, &entrada, &codigo, &carrera, &tipoOperacion, &numeroOperacion, &dni, &fechaRegistro); err != nil {
@@ -291,7 +292,7 @@ func main() {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al procesar datos"})
 			}
 
-			data := []interface{}{id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion, dni, fechaRegistro.Format("2006-01-02 15:04:05")}
+			data := []interface{}{id, nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipoOperacion, numeroOperacion, dni.String, fechaRegistro.Format("2006-01-02 15:04:05")}
 			for i, value := range data {
 				cell := string(rune('A'+i)) + strconv.Itoa(rowIndex)
 				excel.SetCellValue(sheetName, cell, value)
