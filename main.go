@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"image"
@@ -61,8 +62,7 @@ func main() {
 		log.Fatal("DATABASE_URL no está configurada")
 	}
 
-	// Establecer la conexión con la base de datos usando GORM
-	//db, err := sql.Open("postgres", "user=coneimera password=123456 dbname=coneimera sslmode=disable")
+	// Establecer la conexión con la base de datos
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatal("Error al abrir la conexión:", err)
@@ -220,6 +220,7 @@ func main() {
 			// Si el tipo de archivo no es ni imagen ni PDF
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El tipo de archivo no está permitido"})
 		}
+
 		// Guardar en la base de datos
 		_, err = db.Exec(`
     INSERT INTO pagos (nombres, apellidos, correo, telefono, universidad, entrada, codigo, carrera, tipo_operacion, numero_operacion, dni) 
@@ -230,7 +231,8 @@ func main() {
 			log.Printf("Error al insertar en la base de datos: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al insertar en la base de datos"})
 		}
-		// Enviar el correo
+
+		// Enviar el correo al administrador
 		m := gomail.NewMessage()
 		m.SetHeader("From", os.Getenv("EMAIL"))
 		m.SetHeader("To", os.Getenv("EMAILOUT"))
@@ -245,10 +247,16 @@ func main() {
 
 		port, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
 		d := gomail.NewDialer(os.Getenv("SMTP_SERVER"), port, os.Getenv("EMAIL"), os.Getenv("PASSWORD"))
-		d.SSL = false // Mailtrap no usa SSL en el puerto 587
+		d.TLSConfig = &tls.Config{InsecureSkipVerify: true} // Habilitar TLS para MailerSend
 
 		if err := d.DialAndSend(m); err != nil {
 			log.Printf("Error al enviar correo: %v", err)
+			return respondWithError(c, http.StatusInternalServerError, "email_error", nil)
+		}
+
+		// Enviar el correo de confirmación al usuario
+		if err := sendConfirmationEmail(form.Correo, form.Nombres, form.Apellidos, fileData, file.Filename); err != nil {
+			log.Printf("Error al enviar correo de confirmación: %v", err)
 			return respondWithError(c, http.StatusInternalServerError, "email_error", nil)
 		}
 
@@ -364,6 +372,39 @@ func formatBody(form *PaymentForm) string {
 func isValidEmail(email string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 	return re.MatchString(email)
+}
+
+// Función para enviar el correo de confirmación al usuario
+func sendConfirmationEmail(to, nombres, apellidos string, fileData bytes.Buffer, fileName string) error {
+	m := gomail.NewMessage()
+	m.SetHeader("From", os.Getenv("EMAIL"))
+	m.SetHeader("To", to)
+	m.SetHeader("Subject", "Confirmación de Registro de Pago")
+
+	body := fmt.Sprintf(`
+        <h1>Confirmación de Registro de Pago</h1>
+        <p>Hola %s %s,</p>
+        <p>Gracias por registrar tu pago. Hemos recibido tu comprobante y lo estamos procesando.</p>
+        <p>Si tienes alguna pregunta, no dudes en contactarnos.</p>
+        <p>Saludos,</p>
+        <p>El equipo de soporte</p>
+    `, nombres, apellidos)
+
+	m.SetBody("text/html", body)
+	m.Attach(fileName, gomail.SetCopyFunc(func(w io.Writer) error {
+		_, err := w.Write(fileData.Bytes())
+		return err
+	}))
+
+	port, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
+	d := gomail.NewDialer(os.Getenv("SMTP_SERVER"), port, os.Getenv("EMAIL"), os.Getenv("PASSWORD"))
+
+	if err := d.DialAndSend(m); err != nil {
+		log.Printf("Error al enviar correo de confirmación: %v", err)
+		return err
+	}
+
+	return nil
 }
 
 func respondWithError(c echo.Context, statusCode int, errorCode string, details interface{}) error {
